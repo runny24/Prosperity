@@ -151,58 +151,97 @@ class Trader:
         od = state.order_depths[product]
         pos = state.position.get(product, 0)
         limit = self.LIMIT[product]
-        fair = self.ACO_FAIR
         result: list[Order] = []
 
-        buy_capacity  = limit - pos   # how many more we can buy
-        sell_capacity = limit + pos   # how many more we can sell
+        # ── Build sorted orderbooks (positive volumes) ───────────────────────
+        buys  = dict(sorted(od.buy_orders.items(),  reverse=True))  # bid: high→low
+        sells = dict(sorted(od.sell_orders.items()))                 # ask: low→high
 
-        # ── Layer 1: Take any order that crosses fair value ──────────────────
-        # sell orders (asks) below fair → we buy them
-        for ask_price in sorted(od.sell_orders.keys()):
-            if ask_price < fair and buy_capacity > 0:
-                vol = min(-od.sell_orders[ask_price], buy_capacity)
-                result.append(Order(product, ask_price, vol))
-                buy_capacity -= vol
-                logger.print(f"ACO TAKE BUY  {vol}@{ask_price}  (fair={fair})")
+        best_bid  = max(buys)  if buys  else None
+        best_ask  = min(sells) if sells else None
+        worst_bid = min(buys)  if buys  else None   # lowest visible bid  (wall)
+        worst_ask = max(sells) if sells else None   # highest visible ask (wall)
+
+        # wall_mid: midpoint of the outer book edges — more stable than best/ask mid
+        # If one side is missing, fall back to hardcoded fair (don't trade passively)
+        if worst_bid is None or worst_ask is None:
+            wall_mid = self.ACO_FAIR
+            one_sided = True
+        else:
+            wall_mid = (worst_bid + worst_ask) / 2
+            one_sided = False
+
+        buy_capacity  = limit - pos
+        sell_capacity = limit + pos
+
+        # ── Layer 1: Take orders with clear edge vs wall_mid ─────────────────
+        # Take asks clearly below fair (≤ wall_mid - 1)
+        for ask, vol in sells.items():
+            avail = -vol  # sell_orders have negative convention
+            if ask <= wall_mid - 1 and buy_capacity > 0:
+                qty = min(avail, buy_capacity)
+                result.append(Order(product, ask, qty))
+                buy_capacity -= qty
+                logger.print(f"ACO TAKE BUY  {qty}@{ask}  wall_mid={wall_mid:.1f}")
+            elif ask <= wall_mid and pos < 0:
+                # Short inventory: also take at fair to unwind position
+                qty = min(avail, buy_capacity, -pos)
+                if qty > 0:
+                    result.append(Order(product, ask, qty))
+                    buy_capacity -= qty
             else:
                 break
 
-        # buy orders (bids) above fair → we sell to them
-        for bid_price in sorted(od.buy_orders.keys(), reverse=True):
-            if bid_price > fair and sell_capacity > 0:
-                vol = min(od.buy_orders[bid_price], sell_capacity)
-                result.append(Order(product, bid_price, -vol))
-                sell_capacity -= vol
-                logger.print(f"ACO TAKE SELL {vol}@{bid_price}  (fair={fair})")
+        # Take bids clearly above fair (≥ wall_mid + 1)
+        for bid, vol in buys.items():
+            if bid >= wall_mid + 1 and sell_capacity > 0:
+                qty = min(vol, sell_capacity)
+                result.append(Order(product, bid, -qty))
+                sell_capacity -= qty
+                logger.print(f"ACO TAKE SELL {qty}@{bid}  wall_mid={wall_mid:.1f}")
+            elif bid >= wall_mid and pos > 0:
+                # Long inventory: also take at fair to unwind position
+                qty = min(vol, sell_capacity, pos)
+                if qty > 0:
+                    result.append(Order(product, bid, -qty))
+                    sell_capacity -= qty
             else:
                 break
 
-        # ── Layer 2: Quote our own market, penny the best MM if possible ─────
-        best_ask = min(od.sell_orders.keys()) if od.sell_orders else None
-        best_bid = max(od.buy_orders.keys()) if od.buy_orders else None
+        # ── Layer 2: Make the market (skip entirely if one-sided book) ───────
+        if one_sided:
+            return result
 
-        # default quotes: fair ± offset
-        buy_price  = fair - self.ACO_OFFSET
-        sell_price = fair + self.ACO_OFFSET
+        # Start at inner wall edges, then penny any meaningful market maker
+        buy_price  = worst_bid + 1
+        sell_price = worst_ask - 1
 
-        # penny the market makers if their quotes are better than ours
-        # (but only if the resulting price still makes sense vs fair)
-        if best_ask is not None and best_ask - 1 > fair:
-            sell_price = best_ask - 1
-        if best_bid is not None and best_bid + 1 < fair:
-            buy_price = best_bid + 1
+        # Penny the best bid if it has volume > 1 and is still below fair
+        for bid, vol in buys.items():
+            if vol > 1 and bid + 1 < wall_mid:
+                buy_price = max(buy_price, bid + 1)
+                break
+            if bid < wall_mid:
+                buy_price = max(buy_price, bid)
+                break
 
-        # position skew: tighten the side that helps unwind, widen the other
-        # (don't post quotes that worsen our position when near limit)
+        # Penny the best ask if it has volume > 1 and is still above fair
+        for ask, vol in sells.items():
+            avail = -vol
+            if avail > 1 and ask - 1 > wall_mid:
+                sell_price = min(sell_price, ask - 1)
+                break
+            if ask > wall_mid:
+                sell_price = min(sell_price, ask)
+                break
+
+        # Post full remaining capacity
         if buy_capacity > 0:
-            # skew buy price down when very long (make it less aggressive)
-            skew = max(0, pos - 30) // 10  # 0 until pos>30, then +1 per 10 extra
-            result.append(Order(product, buy_price - skew, buy_capacity))
+            result.append(Order(product, buy_price,  buy_capacity))
         if sell_capacity > 0:
-            skew = max(0, -pos - 30) // 10
-            result.append(Order(product, sell_price + skew, -sell_capacity))
+            result.append(Order(product, sell_price, -sell_capacity))
 
+        logger.print(f"ACO MAKE  bid={buy_price} ask={sell_price}  pos={pos}  wall_mid={wall_mid:.1f}")
         return result
 
     # ─────────────────────────────────────────────────────────
