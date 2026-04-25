@@ -1,0 +1,1008 @@
+Round 3 Automatic Trading Development Plan
+==========================================
+
+Goal
+----
+Build a complete Python trading strategy for Round 3 automatic trading.
+
+Target:
+- Immediate milestone: 10000+ platform PnL.
+- Stretch milestone: 20000-30000 platform PnL.
+- Medium milestone: 50000+ platform PnL.
+- Long-term competitive target: 150000+ platform PnL.
+- Current best result: r3_v7.py / r3_v8.py at +7997.42 PnL.
+- Leaderboard reference mentioned by user: about 200000 PnL.
+
+Implication:
+- Do not judge every next version against 150000 immediately.
+- The next practical milestone is beating r3_v3.py and crossing 10000.
+- If a direction cannot plausibly reach 10000, discard it quickly.
+- If a direction reaches 20000-30000, then invest in scaling it.
+- Do not spend main development effort on easy small-increment ideas.
+  Zero-bid lottery orders, tiny probe positions, and other "maybe free" side bets
+  are acceptable only as optional add-ons after the core strategy improves.
+  The main path must focus on scalable contributors: HYDROGEL_PACK,
+  VELVETFRUIT_EXTRACT, VEV_5300, and VEV_5400.
+
+Tradable products:
+- HYDROGEL_PACK
+- VELVETFRUIT_EXTRACT
+- VEV_4000
+- VEV_4500
+- VEV_5000
+- VEV_5100
+- VEV_5200
+- VEV_5300
+- VEV_5400
+- VEV_5500
+- VEV_6000
+- VEV_6500
+
+We will ignore the manual trading challenge.
+
+
+Current Progress
+----------------
+Last updated: after setting 10000+ as the immediate milestone.
+
+Completed:
+- Created round3_data_analysis.ipynb for initial data inspection.
+- Identified the main strategy groups.
+- Built first uploadable baseline trader: r3_v1.py.
+- Tested r3_v1.py on the IMC platform with status FINISHED.
+- r3_v1.py platform PnL was +5201.66.
+- r3_v1.py implements the standard Trader.run(state) interface.
+- r3_v1.py returns result, conversions, and traderData.
+- r3_v1.py uses position limits for all Round 3 products.
+- r3_v1.py uses VELVETFRUIT_EXTRACT as the underlying fair value source for vouchers.
+- r3_v1.py trades HYDROGEL_PACK and VELVETFRUIT_EXTRACT with conservative spot logic.
+- r3_v1.py trades VEV_4000 through VEV_5500 using intrinsic value plus fixed historical time value.
+- r3_v1.py intentionally ignores VEV_6000 and VEV_6500 in v1.
+- r3_v1.py passed a local Python AST syntax check.
+- Analyzed v1 platform log from logs/425459.
+- Built r3_v2.py as a risk-controlled follow-up.
+- r3_v2.py disables passive voucher quotes.
+- r3_v2.py adds voucher soft caps below official position limits.
+- r3_v2.py disables VEV_4000, VEV_4500, VEV_6000, and VEV_6500.
+- Tested r3_v2.py on the IMC platform with status FINISHED.
+- r3_v2.py platform PnL was +4567.29.
+- r3_v2.py reduced max drawdown from about -10339.50 to about -513.11.
+- Built round3_backtester.py.
+- Built round3_voucher_search.py.
+- Ran local replay on r3_v2.py:
+  - day 2 local replay final equity: +12772.50
+  - all days local replay final equity: +42758.50
+- Ran voucher parameter search.
+- Built r3_v3.py high-alpha candidate from voucher search results.
+- Ran local replay on r3_v3.py:
+  - day 2 local replay final equity: +27510.50
+  - all days local replay final equity: +116682.50
+- Tested r3_v3.py on the IMC platform with status FINISHED.
+- r3_v3.py platform PnL was +7731.30.
+- Analyzed r3_v3.py platform log from logs/427194.
+- Built r3_v4.py platform-calibrated no-flip strategy.
+- Ran local replay on r3_v4.py:
+  - day 2 local replay final equity: +16946.50
+  - all days local replay final equity: +62781.50
+- Tested r3_v4.py on the IMC platform with status FINISHED.
+- r3_v4.py platform PnL was +5561.86.
+- Analyzed r3_v4.py platform log from logs/427678.
+
+Not completed yet:
+- r3_v9.py platform test.
+- Further high-alpha research track.
+- Broader systematic parameter/search framework.
+- True voucher pricing model.
+- Cross-product hedge / portfolio strategy.
+- Aggressive strategy experiments that can plausibly reach 150000+.
+- Final submission cleanup as trader.py.
+
+Immediate next step:
+- Upload r3_v9.py with the immediate goal of platform PnL > 10000.
+- Use r3_v7.py / r3_v8.py as the benchmark to beat because they are the current best platform versions.
+- Do not aim for 150000 in one jump.
+- r3_v9.py should focus on scaling proven core contributors rather than adding another easy side bet.
+- Success criteria for r3_v9.py:
+  - minimum: platform PnL > 10000
+  - stretch: platform PnL > 20000
+  - fail fast: if platform PnL <= r3_v7.py / r3_v8.py, do not keep tuning that exact direction
+- Important TTE caveat:
+  - platform logs show activities day=2
+  - historical day 2 has TTE=6 according to round3_info.txt
+  - final Round 3 simulation should have TTE=5
+  - therefore a trader using TTE=5 can look too bearish in platform tests that replay day 2
+
+
+High-Level Strategy Split
+-------------------------
+We split Round 3 into five strategy groups:
+
+1. HYDROGEL_PACK spot strategy
+   - Independent product.
+   - Use simple fair value estimation and conservative market making / mean reversion.
+   - Average spread is large, so avoid aggressive overtrading.
+
+2. VELVETFRUIT_EXTRACT spot strategy
+   - Independent spot product.
+   - Also acts as the underlying price source for all VEV vouchers.
+   - Use fair value estimation, inventory-aware quoting, and possibly short-term mean reversion.
+
+3. Deep in-the-money voucher strategy
+   Products:
+   - VEV_4000
+   - VEV_4500
+   - VEV_5000
+
+   Idea:
+   - These vouchers behave almost like spot minus strike.
+   - Fair value is close to:
+     max(VELVETFRUIT_EXTRACT_fair - strike, 0) + small_time_value
+
+   Trading:
+   - Buy voucher when ask is sufficiently below fair value.
+   - Sell voucher when bid is sufficiently above fair value.
+   - Use wide thresholds for VEV_4000 and VEV_4500 because spreads are large.
+
+4. Middle voucher relative-value strategy
+   Products:
+   - VEV_5100
+   - VEV_5200
+   - VEV_5300
+   - VEV_5400
+   - VEV_5500
+
+   Idea:
+   - These vouchers contain meaningful time value.
+   - Cannot price them using intrinsic value only.
+   - Build a fair-value function based on:
+     spot price, strike, moneyness, TTE, and historical relationship.
+
+   Trading:
+   - Buy when voucher is underpriced versus model fair value.
+   - Sell when voucher is overpriced versus model fair value.
+   - These are likely the highest-value research targets.
+
+5. Far out-of-the-money voucher special handling
+   Products:
+   - VEV_6000
+   - VEV_6500
+
+   Idea:
+   - Historical mid price is constant at 0.5.
+   - Bid is usually 0 and ask is usually 1.
+   - Historical trades occur at 0.
+
+   Trading:
+   - Do not use a normal pricing model.
+   - First baseline can ignore these products.
+   - Optional later rule: buy only if available at 0, avoid buying at 1 unless a clear edge is found.
+
+
+Phase 1: Data Understanding
+---------------------------
+Deliverable:
+- round3_data_analysis.ipynb
+
+Tasks:
+1. Load all price and trade data.
+2. Inspect product list and schema.
+3. Summarize per-product:
+   - mean mid price
+   - standard deviation
+   - min and max mid price
+   - average spread
+   - average best bid / ask volume
+   - historical trade count and quantity
+4. Plot spot products:
+   - HYDROGEL_PACK mid price
+   - VELVETFRUIT_EXTRACT mid price
+5. Plot all vouchers.
+6. Compute voucher intrinsic value:
+   intrinsic = max(VELVETFRUIT_EXTRACT_mid - strike, 0)
+7. Compute voucher time value:
+   time_value = voucher_mid - intrinsic
+8. Identify useful strategy groups.
+
+Status:
+- Completed.
+- Initial notebook created.
+- Initial strategy grouping completed.
+
+
+Phase 2: Build a Local Research Script
+--------------------------------------
+Deliverable:
+- round3_research.py or additional notebook cells
+
+Purpose:
+- Move important calculations from the notebook into reusable functions.
+
+Tasks:
+1. Create helpers to load prices and trades.
+2. Create helpers to get per-product time series.
+3. Create fair value functions:
+   - spot fair value
+   - deep ITM voucher fair value
+   - middle voucher fair value
+4. Add basic signal calculation:
+   - buy signal
+   - sell signal
+   - no-trade signal
+5. Export summary tables for quick inspection.
+
+Status:
+- Partially completed through round3_data_analysis.ipynb.
+- No separate round3_research.py file yet.
+
+
+Phase 3: Implement Baseline Trader
+----------------------------------
+Deliverable:
+- r3_v1.py
+
+Purpose:
+- Produce a valid Round 3 trading algorithm that can run on the Prosperity-style platform.
+
+Core structure:
+1. Implement Trader.run(state).
+2. Parse current order depths.
+3. Estimate fair value for each product.
+4. Generate orders within position limits.
+5. Make position-aware decisions.
+6. Return orders, conversions, and traderData if required by the framework.
+
+Product limits:
+- HYDROGEL_PACK: 200
+- VELVETFRUIT_EXTRACT: 200
+- Each VEV voucher: 300
+
+Baseline fair values:
+1. HYDROGEL_PACK
+   - Use current mid price if available.
+   - Optionally use rolling fair value stored in traderData.
+   - Trade only when best bid / ask deviates enough from fair value.
+
+2. VELVETFRUIT_EXTRACT
+   - Use current mid price as immediate fair value.
+   - Optionally smooth with short rolling mean.
+   - This fair value becomes underlying spot S for voucher pricing.
+
+3. VEV_4000 / VEV_4500 / VEV_5000
+   - fair = max(S - strike, 0) + fixed_time_value
+   - Suggested initial fixed_time_value:
+     VEV_4000: 0
+     VEV_4500: 0
+     VEV_5000: 5
+
+4. VEV_5100 / VEV_5200 / VEV_5300 / VEV_5400 / VEV_5500
+   - fair = historical time-value table or simple curve by strike.
+   - Suggested initial average time values:
+     VEV_5100: 17
+     VEV_5200: 45
+     VEV_5300: 47
+     VEV_5400: 16
+     VEV_5500: 7
+   - fair = intrinsic + estimated_time_value
+
+5. VEV_6000 / VEV_6500
+   - Ignore in first baseline.
+
+Trading rule:
+- If best ask < fair - buy_threshold:
+  buy up to available ask volume and remaining position limit.
+- If best bid > fair + sell_threshold:
+  sell up to available bid volume and remaining short capacity.
+- Threshold should depend on product spread.
+
+Risk controls:
+- Never exceed position limit.
+- Reduce order size as current inventory approaches limit.
+- Use smaller size for model-based voucher trades than for clear arbitrage trades.
+- Avoid trading products with missing order book data.
+
+Status:
+- Completed first version.
+- r3_v1.py implements:
+  - Trader.run(state)
+  - bid() placeholder for interface compatibility
+  - traderData JSON persistence
+  - spot fair value with EMA smoothing
+  - fixed time-value voucher fair value
+  - liquidity-taking when edge is large enough
+  - small passive quotes for selected products
+  - position-aware capacity checks
+  - VEV_6000 / VEV_6500 disabled in v1
+- Local AST syntax check passed.
+- Platform test completed:
+  - status: FINISHED
+  - final PnL: +5201.66
+  - largest observed graph drawdown: about -10339.50
+  - final voucher positions were too concentrated:
+    VEV_5100 +300, VEV_5200 +300, VEV_5300 -300, VEV_5400 +300, VEV_5500 +300
+  - conclusion: v1 has useful alpha but voucher risk is too aggressive.
+
+
+Phase 3.5: Platform Log Analysis And v2 Risk Fixes
+--------------------------------------------------
+Deliverable:
+- r3_v2.py
+
+Purpose:
+- Keep the useful v1 signals while reducing large voucher inventory swings and drawdown.
+
+v1 log findings:
+- Final platform PnL was positive: +5201.66.
+- HYDROGEL_PACK and VELVETFRUIT_EXTRACT both contributed positive PnL.
+- VEV_5300 was the largest contributor.
+- VEV_5100 was the largest drag.
+- VEV_5200 was unstable.
+- VEV_4000, VEV_4500, VEV_6000, and VEV_6500 contributed essentially nothing.
+- V1 allowed many vouchers to reach +/-300, which is too much for an initial risk-controlled strategy.
+
+v2 implementation decisions:
+- Keep HYDROGEL_PACK spot logic.
+- Keep VELVETFRUIT_EXTRACT spot logic.
+- Keep voucher fair value as intrinsic plus historical time value.
+- Disable all voucher passive quotes.
+- Trade vouchers only by taking clearly mispriced existing liquidity.
+- Disable VEV_4000, VEV_4500, VEV_6000, and VEV_6500.
+- Apply voucher soft caps:
+  - VEV_5000: 80
+  - VEV_5100: 100
+  - VEV_5200: 100
+  - VEV_5300: 200
+  - VEV_5400: 150
+  - VEV_5500: 150
+- Increase VEV_5100 and VEV_5200 take thresholds to reduce early overbuying.
+- Reduce voucher max take size per tick.
+
+Status:
+- Completed r3_v2.py.
+- Local AST syntax check passed.
+- Platform test completed:
+  - status: FINISHED
+  - final PnL: +4567.29
+  - graph min: about -513.11
+  - graph max: about +5146.65
+  - final positions: VEV_5100 +2, VEV_5200 +100, VEV_5300 -200, VELVETFRUIT_EXTRACT +42, HYDROGEL_PACK -13
+
+v2 comparison against v1:
+- v2 reduced drawdown massively: about -10339.50 to about -513.11.
+- v2 reduced profit moderately: +5201.66 to +4567.29.
+- v2 fixed the largest v1 loser:
+  - VEV_5100 improved from -1741.29 to -0.04.
+- v2 still kept useful VEV_5300 alpha:
+  - VEV_5300 decreased from +4177.58 to +2997.06 because of the smaller soft cap.
+- v2 lost profitable low-risk v1 modules:
+  - VEV_5400 changed from +935.23 to 0.00.
+  - VEV_5500 changed from +444.79 to 0.00.
+- v2 still left VEV_5200 slightly negative:
+  - VEV_5200 improved from -326.74 to -121.58, but remains not worth prioritizing.
+
+Conclusion:
+- v2 behaved mostly as expected: lower risk, lower PnL.
+- v2 was too conservative on VEV_5400 and VEV_5500.
+- Next step should be r3_v3.py hybrid, not a full revert to v1.
+
+Next test:
+- Build and upload r3_v3.py.
+- Target result:
+  - final PnL greater than r3_v2.py's +4567.29
+  - max drawdown materially below r3_v1.py's about -10339.50
+  - retain VEV_5100 fix
+  - recover part of VEV_5400 / VEV_5500 profit
+  - keep or improve VEV_5300 contribution
+
+
+Phase 3.6: r3_v3 Hybrid Strategy
+--------------------------------
+Deliverable:
+- r3_v3.py
+
+Purpose:
+- Combine v1's profitable voucher exposure with v2's risk controls.
+- This is now considered a small incremental branch, not the main path to 150000+.
+
+Implementation decisions:
+- Keep HYDROGEL_PACK unchanged from v2.
+- Keep VELVETFRUIT_EXTRACT unchanged from v2.
+- Keep VEV_4000, VEV_4500, VEV_6000, and VEV_6500 disabled.
+- Disable or nearly disable VEV_5100:
+  - v1 was strongly negative.
+  - v2 proved we can remove this loss.
+- Disable VEV_5200 or lower its cap to 50:
+  - both v1 and v2 were negative.
+  - only re-enable later if model improves.
+- Increase VEV_5300 soft cap from 200 toward 300:
+  - v1 and v2 were both strongly positive.
+  - VEV_5300 drawdown was not the main v1 risk problem.
+- Re-enable carefully controlled passive quotes for VEV_5400 and VEV_5500:
+  - v1 earned +935.23 and +444.79.
+  - v1 drawdown for these products was relatively small.
+  - use soft caps around 150.
+  - use small passive quote sizes.
+- Do not re-enable passive quotes for VEV_5100 or VEV_5200.
+
+Status:
+- Optional.
+- Not implemented yet.
+- Expected improvement is likely only in the low-thousands range, so it should not consume the main development effort unless we need a quick fallback submission.
+
+
+Phase 3.7: Target Reset And High-Alpha Pivot
+--------------------------------------------
+Deliverable:
+- Updated research direction for 150000+ target.
+
+Reason:
+- v1 produced +5201.66.
+- v2 produced +4567.29.
+- Leaderboard target is around 200000 and user target is at least 150000.
+- Current baseline family is two orders of magnitude too small.
+
+Conclusion:
+- The current fixed-time-value voucher strategy is not enough.
+- Risk-controlled variants cannot bridge the gap.
+- The next main step must be research infrastructure and stronger models, not another hand-tuned baseline.
+
+New main priorities:
+1. Build a local backtester / replay harness.
+2. Reconstruct per-product PnL and position curves under candidate strategies.
+3. Search voucher thresholds, time values, soft caps, and passive quote settings systematically.
+4. Fit a better voucher pricing model:
+   - moneyness curve
+   - TTE decay from historical day 0/1/2
+   - implied volatility / Black-Scholes-inspired pricing
+   - residual mispricing by product
+5. Explore hedged strategies:
+   - long/short voucher against VELVETFRUIT_EXTRACT
+   - pair trades between adjacent strikes
+   - basket positions across VEV_5100 to VEV_5500
+6. Explore aggressive inventory profiles:
+   - holding maximum profitable exposures when signal is strong
+   - explicitly accepting drawdown if expected terminal PnL is much larger
+7. Use platform logs to validate only the most promising candidates.
+
+Success criteria for this phase:
+- Find at least one local or platform-tested strategy above 50000 PnL before final tuning.
+- If no strategy can exceed 50000, treat 150000 as unlikely with current model and revisit assumptions.
+
+Status:
+- Added after v1/v2 results showed baseline scale is too small.
+- Partially implemented.
+- round3_backtester.py and round3_voucher_search.py now exist.
+- r3_v3.py is the first high-alpha candidate.
+- Local results:
+  - r3_v3.py all-days replay: +116682.50
+  - r3_v3.py day-2 replay: +27510.50
+- Platform result:
+  - r3_v3.py platform PnL: +7731.30
+  - graph min: about -944.21
+  - graph max: about +9957.10
+  - final positions: VEV_5300 +283, VEV_5400 +283, VEV_5500 +300, VELVETFRUIT_EXTRACT +42, HYDROGEL_PACK -13
+- Diagnosis:
+  - Local replay expected VEV_5300 / VEV_5400 to finish short.
+  - Platform ended long VEV_5300 / VEV_5400 because the aggressive rule bought back shorts and then flipped long.
+  - The platform result was still positive, so the signal exists, but inventory direction control is missing.
+  - VEV_5500 was negative on platform and should be reduced or disabled.
+- This is closer than v1/v2 but far below the 150000 target, so platform-calibrated strategy control is now required.
+
+
+Phase 3.8: r3_v4 Platform-Calibrated No-Flip Strategy
+-----------------------------------------------------
+Deliverable:
+- r3_v4.py
+
+Purpose:
+- Keep the VEV_5300 / VEV_5400 alpha from v3 while preventing late inventory flips that destroyed the local replay edge on platform.
+
+Implementation decisions:
+- Keep HYDROGEL_PACK unchanged.
+- Keep VELVETFRUIT_EXTRACT unchanged.
+- Keep VEV_4000, VEV_4500, VEV_5100, VEV_5200, VEV_6000, and VEV_6500 disabled.
+- Disable VEV_5500 or cap it very low because platform v3 PnL was -155.21.
+- For VEV_5300 and VEV_5400:
+  - allow sells down to short limit
+  - allow buys only to reduce an existing short position back toward zero
+  - do not allow buys that flip position positive
+  - keep soft cap at 300
+  - keep v3 time values and edges initially
+- Goal:
+  - preserve most of v3 platform VEV_5300 / VEV_5400 realized gains
+  - avoid ending long +283/+283
+  - improve platform PnL above +7731.30
+
+Status:
+- Implemented as r3_v4.py.
+- Local AST check passed.
+- Local replay:
+  - day 2: +16946.50
+  - all days: +62781.50
+- Local replay is lower than r3_v3.py because no-flip intentionally gives up some round-trip trades.
+- Platform test completed:
+  - r3_v4.py platform PnL: +5561.86
+  - graph min: about -1109.06
+  - graph max: about +6119.49
+  - final positions: VEV_5300 -17, VEV_5400 -17, VELVETFRUIT_EXTRACT +42, HYDROGEL_PACK -13
+- Diagnosis:
+  - no-flip fixed the final long inventory problem but also removed profitable platform fills.
+  - VEV_5300 platform PnL fell from +4297.13 in v3 to +2637.71 in v4.
+  - VEV_5400 platform PnL fell from +1897.52 in v3 to +1232.29 in v4.
+  - Disabling VEV_5500 avoided its v3 loss, but the gain was too small to compensate.
+  - Therefore the v3/v4 fixed time-value direction is not enough for the 150000+ target.
+
+
+Phase 3.9: Direction Reassessment After v3/v4
+---------------------------------------------
+Deliverable:
+- Platform-calibrated research plan before any new trader version.
+
+Current platform ranking:
+- r3_v3.py: +7731.30
+- r3_v4.py: +5561.86
+- r3_v1.py: +5201.66
+- r3_v2.py: +4567.29
+
+Conclusion:
+- The recent changes did not move us toward 150000+.
+- v3 was the best platform version, but only by a small amount.
+- v4 proved no-flip was a local patch, not a high-alpha strategy.
+- The broad fixed-time-value threshold approach is likely too weak.
+- The local backtester is useful for rough triage but overestimates platform-scalable alpha.
+
+New research priorities:
+1. Platform-log calibration
+   - Parse all platform logs into a single comparison table.
+   - Track PnL, positions, fills, and per-product contribution.
+   - Infer which fills are likely passive vs active.
+   - Adjust the simulator or flag signals that rely on unrealistic replay assumptions.
+
+2. Proper option model
+   - Fit TTE-aware Black-Scholes-inspired values for each voucher.
+   - Estimate implied volatility smile from day 0/1/2.
+   - Use Round 3 TTE=5 instead of fixed historical average time values.
+   - Compare voucher mid to model fair by timestamp and strike.
+
+3. Hedged relative value
+   - Trade voucher residuals while hedging delta with VELVETFRUIT_EXTRACT.
+   - Explore adjacent-strike spreads such as VEV_5300 vs VEV_5400.
+   - Avoid relying only on naked terminal voucher inventory.
+
+4. Product triage
+   - Keep spot modules as stable +1700ish platform base.
+   - VEV_5300 and VEV_5400 are useful but not enough alone.
+   - VEV_5100, VEV_5200, and VEV_5500 should stay disabled until a better model explains them.
+
+Next action:
+- Use round3_log_analysis.py after every platform submission.
+- Use round3_option_model.py to compare TTE=6 platform-test fair values vs TTE=5 final-round fair values.
+- Do not upload r3_v5.py as-is; its local day-2 replay is poor because it prices vouchers with TTE=5 while day-2 tests likely behave like TTE=6.
+
+Status:
+- Implemented round3_log_analysis.py.
+- Implemented round3_option_model.py.
+- Implemented r3_v5.py as a first TTE-aware option-model candidate.
+- r3_v5.py local day-2 replay was poor:
+  - final equity: -6106.50
+  - reason: model used TTE=5 and aggressively shorted vouchers on day-2 data.
+- r3_v5.py should not be uploaded without TTE/test calibration.
+- Implemented r3_v5_tte6.py for day-2-style platform tests.
+- Implemented r3_v6_tte6.py by disabling losing VEV_5000.
+- Implemented r3_v6_final_tte5.py for final Round 3 TTE=5.
+- r3_v6_tte6.py local day-2 replay:
+  - final equity: +33397.00
+  - main positive products: VEV_5200, VEV_5300, VEV_5100, VEV_5400, VEV_5500
+- r3_v6_tte6.py is the next platform-test candidate.
+- r3_v6_final_tte5.py should not be judged by day-2 platform tests because it intentionally uses final-round TTE=5.
+- Tested r3_v6_tte6.py on the IMC platform with status FINISHED.
+- r3_v6_tte6.py platform PnL was +3199.71, the weakest tested version so far.
+- r3_v6_tte6.py ended short across VEV_5100, VEV_5200, VEV_5300, VEV_5400, and VEV_5500.
+- The option-model naked-short direction is not working on the platform test.
+- Tested r3_v7.py on the IMC platform with status FINISHED.
+- r3_v7.py platform PnL was +7997.42.
+- r3_v7.py beat r3_v3.py by only about +266.13, mostly from tiny VEV_5100 / VEV_5200 probes and removing VEV_5500.
+- Built r3_v8.py as a low-risk lottery experiment on top of r3_v7.py.
+- Tested r3_v8.py on the IMC platform with status FINISHED.
+- r3_v8.py platform PnL was +7997.42, exactly identical to r3_v7.py.
+- v8 proved that zero-bid VEV_6000 / VEV_6500 lottery orders did not fill on the platform test.
+- Planning decision: stop prioritizing easy small-increment ideas; focus on scalable core changes.
+- Built r3_v9.py as a proven-core scaling candidate.
+
+
+Phase 3.10: r3_v7 Milestone Strategy For 10000+
+-----------------------------------------------
+Deliverable:
+- r3_v7.py
+
+Purpose:
+- First milestone strategy after direction reset.
+- Target platform PnL > 10000.
+- Use r3_v3.py's +7731.30 as the benchmark to beat.
+
+Rationale:
+- v1/v2/v4/v6 are all in the 3000-6000 range.
+- v3 is best at +7731.30.
+- Directly targeting 150000 creates too much noise in evaluation.
+- A 10000+ milestone lets us validate whether a new direction is genuinely better.
+
+Strategy direction:
+- Stop pure naked voucher directional bets.
+- Keep the stable spot base:
+  - HYDROGEL_PACK
+  - VELVETFRUIT_EXTRACT
+- Use relative-value logic among vouchers:
+  - compare VEV_5200 / VEV_5300 / VEV_5400 relationships
+  - prefer pair or basket trades over single-product naked exposure
+  - avoid VEV_5100, VEV_5200, and VEV_5500 unless their role is hedging or spread construction
+- Use platform logs as calibration:
+  - VEV_5300 and VEV_5400 have consistent positive platform contribution
+  - VEV_5500 is unstable
+  - VEV_5100 and VEV_5200 were bad in earlier naked strategies
+
+Candidate r3_v7 approach:
+- Start from r3_v3.py because it is the best platform version.
+- Keep VEV_5300 / VEV_5400 as the core.
+- Add a controlled relative-value spread:
+  - when VEV_5300 is rich relative to VEV_5400, sell VEV_5300 and buy a smaller amount of VEV_5400
+  - when VEV_5300 is cheap relative to VEV_5400, buy VEV_5300 and sell a smaller amount of VEV_5400
+- Keep total voucher exposure smaller than v3, but allow enough size to beat 10000.
+- Disable VEV_5500 in first r3_v7 unless spread tests show it helps.
+- Do not use r3_v6_tte6.py as the base because its platform result was too weak.
+
+Success criteria:
+- Platform PnL > 10000.
+- VEV_5300 + VEV_5400 combined contribution should exceed r3_v3's combined contribution of about +6194.65.
+- Total drawdown should stay below r3_v1's worst drawdown.
+- Final positions should be explainable by the spread logic, not accidental inventory drift.
+
+Status:
+- Implemented as r3_v7.py.
+- Local replay:
+  - day 2: +23562.00
+  - all days: +105818.00
+- Platform test:
+  - PnL: +7997.42
+  - best platform result so far, but still below the 10000 milestone.
+  - VEV_5300 / VEV_5400 contribution matched r3_v3.
+  - VEV_5100 / VEV_5200 probes added only small positive PnL.
+  - spread overlay did not materially move results.
+- Important caveat:
+  - local replay still overstates platform-scalable alpha.
+  - VEV_5100 / VEV_5200 are included only as tiny probe positions.
+  - If platform result is below r3_v3.py's +7731.30, remove these probes and rethink spread construction.
+- Next test:
+  - r3_v7.py already tested.
+  - r3_v8.py already tested and produced identical platform PnL.
+  - r3_v9.py is the next platform candidate.
+
+
+Phase 3.11: r3_v8 Zero-Bid Lottery Experiment
+---------------------------------------------
+Deliverable:
+- r3_v8.py
+
+Purpose:
+- Try to add low-risk incremental PnL without disturbing r3_v7's core.
+
+Rationale:
+- Historical trades show VEV_6000 and VEV_6500 can print at 0.
+- The normal book is usually bid=0, ask=1.
+- A 0-price buy order is non-crossing and should only fill if bots sell for free.
+- If it does not fill, it should not change the core strategy.
+- If it fills, the cost is zero and terminal option value is nonnegative.
+
+Implementation:
+- Start from r3_v7.py.
+- Add 0-price buy orders for VEV_6000 and VEV_6500 up to position limit.
+- Keep all other logic unchanged.
+
+Status:
+- Implemented as r3_v8.py.
+- Local replay is unchanged from r3_v7.py because the local backtester does not simulate passive 0-price bot fills.
+- Platform test completed:
+  - PnL: +7997.42
+  - result was exactly identical to r3_v7.py
+  - VEV_6000 / VEV_6500 zero-bid lottery orders did not produce fills
+- Conclusion:
+  - this type of "free optional PnL" is not worth main development time.
+  - keep the idea as harmless optional decoration only if it never distracts from core alpha.
+
+
+Phase 3.12: r3_v9 Proven-Core Scaling Strategy
+-----------------------------------------------
+Deliverable:
+- r3_v9.py
+
+Purpose:
+- Reach the immediate 10000+ milestone by improving proven contributors, not by chasing small side bets.
+
+Planning rule:
+- Do not focus on easy small-increment ideas as the main path.
+- Stop treating zero-bid lottery orders, tiny probes, and passive "maybe fill" ideas as meaningful progress.
+- A new version should have a plausible path to at least +2000 over r3_v7 / r3_v8, otherwise it is not worth another platform test.
+
+Implementation:
+- Start from r3_v8.py / r3_v7.py.
+- Remove zero-bid lottery orders because v8 did not change platform result.
+- Keep the proven core:
+  - HYDROGEL_PACK
+  - VELVETFRUIT_EXTRACT
+  - VEV_5300
+  - VEV_5400
+- Make VELVETFRUIT_EXTRACT spot trading more active:
+  - lower take edge from 3 to 2
+  - lower passive quote edge from 4 to 3
+  - increase passive quote size from 24 to 36
+- Slightly increase VEV_5300 / VEV_5400 max take size from 80 to 100.
+- Re-enable VEV_5500 only under a strict low-price rule:
+  - buy only at price <= 5
+  - sell existing long inventory only at price >= 8
+  - no normal model-based buying at 6 or 7
+- Keep VEV_6000 / VEV_6500 disabled.
+
+Status:
+- Implemented as r3_v9.py.
+- Local syntax check passed.
+- Local day-2 replay:
+  - final equity: +28091.00
+  - r3_v8 local day-2 replay was +23562.00, so local delta is about +4529.00
+  - main local improvement came from more active VELVETFRUIT_EXTRACT and strict low-price VEV_5500 buying
+  - warning: local replay probably overstates passive spot fill quality, so platform test is required.
+- Next test:
+  - upload r3_v9.py to the platform.
+  - compare against r3_v7 / r3_v8 benchmark of +7997.42.
+  - success means crossing +10000 or at least showing a real platform improvement larger than the previous +266 step.
+
+
+Phase 4: Build Local Backtester
+-------------------------------
+Deliverable:
+- round3_backtester.py
+
+Purpose:
+- Evaluate strategy logic against historical order book snapshots before submitting.
+- This phase is now mandatory before further serious strategy work because manual platform-only iteration is too slow for a 150000+ target.
+
+Simple backtest assumption:
+- At each timestamp, strategy sees current order book.
+- If strategy sends a buy order at or above best ask, assume it fills at best ask up to visible volume.
+- If strategy sends a sell order at or below best bid, assume it fills at best bid up to visible volume.
+- Track cash, positions, and mark-to-market PnL.
+
+Tasks:
+1. Load historical price data.
+2. Replay timestamps in order.
+3. Build a simplified TradingState-like object.
+4. Call Trader.run(state).
+5. Simulate fills.
+6. Track:
+   - cash
+   - position
+   - mark-to-market value
+   - total PnL
+   - per-product PnL
+7. Output performance summary and plots.
+8. Run parameter sweeps for voucher strategies.
+9. Output per-product PnL, max drawdown, final positions, and trade counts.
+10. Support comparing multiple trader files or strategy parameter sets.
+
+Important limitation:
+- Historical order books do not guarantee our orders would actually fill in the real competition.
+- Backtest is mainly for sanity checking and comparing strategy variants.
+
+Status:
+- Completed first version as round3_backtester.py.
+- It supports:
+  - loading trader .py files
+  - injecting a minimal datamodel stub
+  - replaying day 0, day 1, day 2, or all days
+  - immediate crossing-fill simulation
+  - final equity, max/min equity, max drawdown, positions, fills, and per-product PnL
+- Known limitation:
+  - passive platform fills are not simulated, so platform PnL can differ substantially.
+  - use it for ranking and risk direction, not exact score prediction.
+
+
+Phase 5: Tune Strategy Parameters
+---------------------------------
+Deliverable:
+- parameter notes in round3_experiment_log.txt
+
+Parameters to tune:
+1. HYDROGEL_PACK
+   - fair value smoothing window
+   - buy threshold
+   - sell threshold
+   - max order size
+
+2. VELVETFRUIT_EXTRACT
+   - fair value smoothing window
+   - buy threshold
+   - sell threshold
+   - max order size
+
+3. Deep ITM vouchers
+   - fixed time value
+   - threshold by product
+   - max order size
+
+4. Middle vouchers
+   - time value estimates
+   - threshold by product
+   - inventory scaling
+   - whether to trade all middle vouchers or only the strongest ones
+
+5. Far OTM vouchers
+   - ignore or special-case
+
+Evaluation criteria:
+- Total PnL
+- Per-product PnL
+- Max inventory usage
+- Number of trades
+- Sensitivity to threshold changes
+- Whether performance comes from one fragile product or several robust signals
+
+Status:
+- Started with round3_voucher_search.py.
+- Initial search found:
+  - VEV_5200 remains negative across tested ranges.
+  - VEV_5300 has the strongest historical edge.
+  - VEV_5400 has meaningful historical edge.
+  - VEV_5500 has smaller but positive edge.
+- r3_v3.py uses:
+  - VEV_5300 time_value 50, edge 3.0, cap 300, max_take 80
+  - VEV_5400 time_value 16, edge 1.0, cap 300, max_take 80
+  - VEV_5500 time_value 8, edge 0.5, cap 300, max_take 80
+
+
+Phase 6: Improve Voucher Pricing
+--------------------------------
+Deliverable:
+- improved voucher fair value model inside strategy
+
+Possible approaches:
+
+1. Historical time-value table
+   - Group by product.
+   - Estimate average time value from history.
+   - Simple and robust.
+
+2. Moneyness curve
+   - Use x = spot - strike.
+   - Fit voucher price or time value as a function of x.
+   - Could use binning, interpolation, or simple polynomial regression.
+
+3. TTE-aware model
+   - Historical days have TTE 8, 7, and 6.
+   - Round 3 final has TTE 5.
+   - Estimate how time value decays as TTE decreases.
+
+4. Black-Scholes-inspired model
+   - Estimate volatility from VELVETFRUIT_EXTRACT historical returns.
+   - Price call options using S, K, T, sigma.
+   - Use as a reference, not necessarily the final truth.
+
+Recommended path:
+- Stop relying on fixed historical time-value table as the main model.
+- Fit moneyness and TTE-aware models immediately.
+- Use Black-Scholes-inspired pricing or implied-vol calibration as a serious candidate, not a late optional add-on.
+
+Status:
+- Started only at baseline level.
+- r3_v1.py and r3_v2.py use historical fixed time-value estimates.
+- Moneyness curve, TTE decay, and Black-Scholes-inspired models are not implemented yet.
+- These are now core requirements for the 150000+ target.
+
+
+Phase 7: Final Strategy Assembly
+--------------------------------
+Deliverable:
+- trader.py
+
+Tasks:
+1. Clean up baseline code.
+2. Keep only useful strategy modules.
+3. Hard-code final parameters.
+4. Add comments for important model assumptions.
+5. Ensure compatibility with the competition interface.
+6. Ensure no dependency on pandas, numpy, or local files inside final trader.py unless the platform allows them.
+
+Final code requirements:
+- One self-contained Python file.
+- Uses platform-supported imports. r3_v1.py currently uses only standard library imports plus datamodel for simplicity.
+- Handles missing products gracefully.
+- Does not print excessive logs.
+- Does not exceed position limits.
+
+Status:
+- Not started as final assembly.
+- r3_v1.py and r3_v2.py are testable baselines, not final tuned submissions.
+
+
+Phase 8: Final Testing Checklist
+--------------------------------
+Before submission:
+
+1. Run notebook and confirm data assumptions.
+2. Run local backtester on all three historical days.
+3. Check each product's final PnL.
+4. Check maximum position for every product.
+5. Check no order exceeds position limit.
+6. Check no crashes on missing or empty order books.
+7. Check strategy still works if traderData is empty.
+8. Review final trader.py manually.
+9. Submit only after the code is self-contained.
+
+Status:
+- Not completed.
+- r3_v1.py has platform results.
+- r3_v2.py has platform results.
+- r3_v3.py has platform results.
+- r3_v4.py has platform results.
+- No current version is close to the 150000+ target.
+
+
+Initial Implementation Priority
+-------------------------------
+Recommended order:
+
+1. Implement VELVETFRUIT_EXTRACT fair value. DONE in r3_v1.py and r3_v2.py.
+2. Implement voucher pricing based on VELVETFRUIT_EXTRACT. DONE in r3_v1.py and r3_v2.py.
+3. Implement VEV_5100 to VEV_5500 relative-value trading. DONE in r3_v1.py baseline; risk-reduced in r3_v2.py.
+4. Add VEV_4000 / VEV_4500 / VEV_5000 deep ITM arbitrage. DONE in r3_v1.py baseline; VEV_4000 / VEV_4500 disabled in r3_v2.py.
+5. Add HYDROGEL_PACK simple strategy. DONE in r3_v1.py and r3_v2.py.
+6. Ignore VEV_6000 / VEV_6500 until we find a clear edge. DONE in r3_v1.py and r3_v2.py.
+7. Build r3_v3.py high-alpha candidate. DONE.
+8. Build backtester. DONE as round3_backtester.py.
+9. Build initial voucher parameter search. DONE as round3_voucher_search.py.
+10. Upload r3_v3.py to platform. DONE, PnL +7731.30.
+11. Build r3_v4.py no-flip platform correction. DONE.
+12. Upload r3_v4.py to platform. DONE, PnL +5561.86.
+13. Build platform log analysis script. DONE as round3_log_analysis.py.
+14. Build improved voucher pricing model. DONE first version as round3_option_model.py.
+15. Build TTE=6 platform-test trader. DONE as r3_v6_tte6.py.
+16. Build TTE=5 final-round trader. DONE as r3_v6_final_tte5.py.
+17. Upload r3_v6_tte6.py to platform. DONE, PnL +3199.71.
+18. Stop testing naked voucher directional variants. DONE as planning decision.
+19. Build r3_v7.py targeting 10000+ platform PnL. DONE.
+20. Upload r3_v7.py to platform. DONE, PnL +7997.42.
+21. Build r3_v8.py zero-bid lottery experiment. DONE.
+22. Upload r3_v8.py to platform. DONE, PnL +7997.42, identical to r3_v7.py.
+23. Stop prioritizing easy small-increment ideas. DONE as planning decision.
+24. Build r3_v9.py proven-core scaling candidate. DONE.
+25. Upload r3_v9.py to platform. TODO, now highest priority.
+26. Explore hedged and relative-value voucher portfolios. TODO.
+27. Tune final strategy after a platform-tested 10000+ candidate is found. TODO.
+
+
+Open Questions
+--------------
+1. Are we using the official Prosperity datamodel.py from previous rounds?
+2. Do we already have a local backtesting framework from Round 1 or Round 2?
+3. Should the first submitted version prioritize safety or aggressive expected PnL?
+4. Platform requirements appear to allow pandas/numpy. r3_v1.py does not use them because v1 logic is simple enough without them.
+
+
+Current Best First Baseline
+---------------------------
+Use these modules first:
+
+1. VELVETFRUIT_EXTRACT:
+   - fair = current mid
+   - quote around fair with threshold around 2 to 4
+
+2. Middle vouchers:
+   - fair = max(S - K, 0) + historical average time value
+   - trade only if edge is greater than spread plus safety margin
+
+3. Deep ITM vouchers:
+   - fair = max(S - K, 0) + small time value
+   - trade only on clear mispricing
+
+4. HYDROGEL_PACK:
+   - fair = rolling mean or current mid
+   - conservative trading only
+
+5. VEV_6000 / VEV_6500:
+   - no trade in first version
