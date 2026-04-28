@@ -1,0 +1,7 @@
+lane,experiment_type,jobs,mean_score
+drift_search,regime_rule_search,36,0.4999888120220732
+drift_search,timestamp_window_search,72,0.9553153450088148
+no_prior,regime_rule_search,36,0.6589999621304733
+no_prior,timestamp_window_search,72,0.9593422004093228
+p3_seeded,regime_rule_search,96,0.6215666980343021
+p3_seeded,timestamp_window_search,240,0.9542013889303882
