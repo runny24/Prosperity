@@ -1,0 +1,509 @@
+ROUND5 alpha improvement plan
+Generated from:
+- baseline run: logs/567124/567124.py, logs/567124/567124.log, logs/567124/567124.json
+- alpha notebook: commodity_alpha_exploration.ipynb
+
+1. Baseline diagnosis
+
+The current baseline is a dual-EMA trend-following strategy on a small whitelist,
+plus a special PEBBLES_XL constraint-arbitrage strategy.
+
+Reported final profit: 28,452.03.
+
+Per-product final PnL:
+- GALAXY_SOUNDS_PLANETARY_RINGS: +5,525.89
+- PEBBLES_XL: +5,382.75
+- SLEEP_POD_COTTON: +5,129.56
+- ROBOT_IRONING: +4,040.00
+- UV_VISOR_AMBER: +2,978.94
+- TRANSLATOR_GRAPHITE_MIST: +2,091.18
+- ROBOT_MOPPING: +2,011.95
+- PANEL_1X4: +1,829.47
+- OXYGEN_SHAKE_MORNING_BREATH: +798.83
+- GALAXY_SOUNDS_BLACK_HOLES: -103.98
+- MICROCHIP_OVAL: -502.80
+- MICROCHIP_CIRCLE: -729.75
+
+Important risk observation:
+- Total PnL finished at the high, but intraday max drawdown was about -8,145.
+- PEBBLES_XL had the largest product-level drawdown, about -5,487, despite ending positive.
+- MICROCHIP_OVAL, MICROCHIP_CIRCLE, and GALAXY_SOUNDS_BLACK_HOLES were weak in the submitted run.
+
+Current baseline weaknesses:
+- It ignores the strongest alpha found in the notebook: short-horizon order-book imbalance and microprice.
+- It trades only a whitelist, leaving obvious high-IC products unused, especially SNACKPACK products.
+- Most non-XL products are directional EMA bets, which can become day-trend overfit.
+- It has no family-relative mean-reversion module except the custom PEBBLES_XL constraint.
+- It does not combine independent signals; one EMA signal mostly controls position target.
+
+2. Alpha findings to use first
+
+Highest-confidence alpha:
+- Level-1 imbalance predicts 1-tick and 5-tick returns.
+- Microprice edge predicts 1-tick and 5-tick returns.
+- Level-3 imbalance predicts with the opposite sign.
+
+Aggregate validation IC:
+- imbalance_1, horizon 1: about +0.048
+- microprice_edge_bps, horizon 1: about +0.046
+- imbalance_3, horizon 1: about -0.050
+- imbalance_1, horizon 5: about +0.023
+- microprice_edge_bps, horizon 5: about +0.022
+- imbalance_3, horizon 5: about -0.023
+
+This is the cleanest improvement target because it repeats across almost all
+products and is not just one product-specific curve fit.
+
+Second-highest-confidence alpha:
+- Family-relative z-score mean reversion.
+- If a product is rich versus its product family, it tends to mean-revert over
+  20-100 ticks.
+
+Promising pair/family candidates:
+- PEBBLES_XL vs PEBBLES_XS
+- PANEL_2X2 vs PANEL_4X4
+- PEBBLES_M vs PEBBLES_S
+- SNACKPACK_PISTACHIO vs SNACKPACK_VANILLA
+- SNACKPACK_PISTACHIO vs SNACKPACK_STRAWBERRY
+- SNACKPACK_RASPBERRY vs SNACKPACK_VANILLA
+- MICROCHIP_CIRCLE vs MICROCHIP_RECTANGLE
+- MICROCHIP_OVAL vs MICROCHIP_TRIANGLE
+
+Weak alpha:
+- Public trade-print markouts are not strong globally.
+- Do not prioritize trade-print alpha yet.
+
+3. Priority implementation plan
+
+Step 1: Add a microstructure overlay to the existing baseline.
+
+Goal:
+- Improve entries/exits and reduce bad fills without changing the whole strategy.
+
+Implementation:
+- For every product with an order book, compute:
+  - best_bid, best_ask, mid
+  - spread
+  - imbalance_1 = (bid_volume_1 - ask_volume_1) / (bid_volume_1 + ask_volume_1)
+  - imbalance_3 = (sum_bid_vol_1_3 - sum_ask_vol_1_3) / total_depth_1_3
+  - microprice = (ask * bid_volume_1 + bid * ask_volume_1) / (bid_volume_1 + ask_volume_1)
+  - micro_edge = microprice - mid
+
+Use a combined short-horizon score:
+- micro_score = +w1 * imbalance_1 + w2 * micro_edge_ticks - w3 * imbalance_3
+
+Initial simple weights:
+- w1 = 1.0
+- w2 = 0.5
+- w3 = 1.0
+
+Use it conservatively:
+- If EMA target is long, only buy aggressively when micro_score is positive.
+- If EMA target is short, only sell aggressively when micro_score is negative.
+- If micro_score disagrees with EMA, either quote passively only or reduce target by half.
+- If flat and abs(micro_score) is very high, allow small position, e.g. +/-2, especially in SNACKPACK.
+
+Why this should help:
+- The baseline currently crosses spreads based on slow EMA state.
+- The strongest notebook alpha is a 1-5 tick book signal, which is exactly the horizon that decides whether a taker fill is good or bad.
+
+Step 2: Add microstructure products that baseline does not trade.
+
+Start with SNACKPACK products because they had very clean product-level imbalance IC:
+- SNACKPACK_PISTACHIO
+- SNACKPACK_CHOCOLATE
+- SNACKPACK_VANILLA
+- SNACKPACK_STRAWBERRY
+- SNACKPACK_RASPBERRY
+
+Initial rule:
+- Only trade these with microstructure signal, not EMA trend.
+- Position limit target should be smaller than the baseline trend products at first, e.g. +/-4 or +/-5.
+- Use taker orders only when expected edge exceeds spread cost.
+- Otherwise place passive orders one tick inside the book in the predicted direction.
+
+Acceptance test:
+- Backtest day 2, day 3, day 4 separately.
+- Keep a product only if all-day aggregate is positive or if losses are small and signal IC remains stable.
+
+Step 3: Replace or downweight weak EMA-only products.
+
+Weak in current online-style log:
+- MICROCHIP_CIRCLE: -729.75
+- MICROCHIP_OVAL: -502.80
+- GALAXY_SOUNDS_BLACK_HOLES: -103.98
+
+Do not necessarily remove them forever. Instead:
+- Disable pure EMA trading for these names.
+- Re-enable only when microstructure confirms the EMA direction.
+- For MICROCHIP names, prefer family-relative mean reversion over directional EMA.
+
+Rationale:
+- MICROCHIP and PEBBLES have huge ranges, so directional profits can be large,
+  but slow EMA is vulnerable to full-day trend overfit.
+
+Step 4: Expand family-relative mean reversion.
+
+Current baseline only has an explicit structural fair-value rule for PEBBLES_XL:
+- PEBBLES_XL fair = 50000 - sum(other PEBBLES mids)
+
+Keep that rule, but add a general family z-score module:
+- For each family, keep rolling log-mid history per product.
+- Compute family mean log price at each timestamp.
+- Compute product residual = log_mid - family_mean.
+- Track rolling mean/std of residual.
+- z = (residual - rolling_mean) / rolling_std.
+
+Initial trade rule:
+- If z > +1.5, product is rich: bias short.
+- If z < -1.5, product is cheap: bias long.
+- Exit when abs(z) < 0.5.
+- Use horizon 20-100; do not churn every tick.
+
+Prioritize these:
+- PEBBLES family
+- SNACKPACK family
+- PANEL family
+- MICROCHIP family
+
+Start with pair-specific versions before a full family basket:
+- PEBBLES_XL vs PEBBLES_XS
+- PANEL_2X2 vs PANEL_4X4
+- PEBBLES_M vs PEBBLES_S
+- SNACKPACK_PISTACHIO vs SNACKPACK_VANILLA
+- SNACKPACK_PISTACHIO vs SNACKPACK_STRAWBERRY
+
+Step 5: Combine signals into one target function.
+
+Instead of letting EMA alone choose target, use:
+- trend_score from fast EMA - slow EMA
+- micro_score from imbalance/microprice
+- rv_score from family relative z-score
+
+Suggested target logic:
+- If trend_score and micro_score agree: full trend target allowed.
+- If trend_score and micro_score disagree: half target or passive-only.
+- If rv_score is strong and trend_score is weak: trade RV target.
+- If rv_score is strong against trend_score: reduce trend exposure unless micro_score also agrees with trend.
+
+This should reduce overfitted directional exposure while adding the robust short-horizon alpha.
+
+4. Backtesting and validation plan
+
+Minimum experiments:
+
+Experiment A: Baseline reproduction
+- Confirm local replay reproduces roughly 28.45k on day 4 log conditions.
+- Save per-product PnL and drawdown.
+
+Experiment B: Baseline + microstructure execution filter
+- Same product whitelist as baseline.
+- Only change execution/target gating with micro_score.
+- Success criterion: same or higher PnL with lower drawdown, especially fewer bad taker fills.
+
+Experiment C: Microstructure-only SNACKPACK module
+- Add all five SNACKPACK names.
+- Keep limits small.
+- Success criterion: positive standalone PnL on day 4 and no huge inventory mark-to-market dependency.
+
+Experiment D: Family RV module
+- First test pair-only rules for the top pairs.
+- Then test family basket version.
+- Success criterion: improves PnL on validation without relying on a single product's full-day trend.
+
+Experiment E: Combined target
+- Combine EMA, microstructure, and RV.
+- Compare:
+  - final PnL
+  - max drawdown
+  - per-product contribution
+  - number of trades
+  - average entry markout over 1, 5, 20 ticks
+
+Validation rule:
+- Do not accept a change just because total PnL improves on one day.
+- Require at least one of:
+  - improves day 4 and does not degrade days 2-3 badly
+  - improves risk-adjusted PnL
+  - turns a known losing product/module into flat or positive
+  - improves fill markouts even if final PnL is similar
+
+5. Do we need to dig deeper for alpha?
+
+Answer: yes, but not before implementing the first two improvements.
+
+We already have enough signal to improve the baseline:
+- imbalance_1 and microprice are broad, stable, high-confidence signals
+- imbalance_3 has a stable opposite sign and should be included
+- family RV gives a second independent alpha source
+
+The deeper alpha work should be targeted, not open-ended:
+- Build a proper replay/backtest harness if not already available.
+- Measure fill markouts for our own trades, not just public trades.
+- Test signal decay by timestamp bucket: early/mid/late day.
+- Test product-specific thresholds for SNACKPACK, PEBBLES, MICROCHIP, PANEL.
+- Check whether imbalance alpha survives after excluding wide-spread moments.
+- Check whether RV signals work better when microstructure confirms the entry.
+
+6. Recommended next code changes
+
+First code change:
+- Add helper methods to Trader:
+  - _book_features(od)
+  - _micro_score(od)
+  - _micro_filtered_target(prod, od, ema_target)
+
+Second code change:
+- Modify _trade_ema so taker orders require micro_score confirmation.
+
+Third code change:
+- Add a small SNACKPACK microstructure-only strategy.
+
+Fourth code change:
+- Add rolling family residual state in traderData and implement a pair/RV module.
+
+Best first target:
+- Implement Step 1 only, then backtest.
+- It is low risk because it changes execution quality without expanding the universe.
+
+7. Revision after r5_v1 backtest
+
+The r5_v1 result was not expected. The original plan assumed that adding a broad
+microstructure execution filter to EMA products would be low risk. The
+conservative replay showed the opposite:
+
+- original logged baseline on day 4: +61,650.50, max drawdown -19,834.00
+- r5_v1 on day 4: -16,826.00, max drawdown -46,123.00
+
+The failure was concentrated in names where the micro overlay interfered with
+the original EMA behavior:
+- MICROCHIP_OVAL: -31,689.00 in r5_v1
+- PANEL_1X4: -21,461.00 in r5_v1
+- ROBOT_MOPPING: -12,099.00 in r5_v1
+- OXYGEN_SHAKE_MORNING_BREATH: -6,223.00 in r5_v1
+- MICROCHIP_CIRCLE: -4,013.00 in r5_v1
+
+Corrected interpretation:
+- Do not broadly gate EMA execution with microstructure yet.
+- Preserve the original EMA execution for names that the conservative harness
+  says are working.
+- Use microstructure alpha as a standalone module first, where it can be
+  measured separately.
+- Prune weak EMA products before adding complexity.
+
+r5_v2 implementation:
+- Start from baseline behavior, not from r5_v1's broad micro-gated EMA.
+- Remove OXYGEN_SHAKE_MORNING_BREATH, ROBOT_MOPPING, and PANEL_1X4.
+- Keep PEBBLES_XL constraint arb.
+- Keep GALAXY_SOUNDS_PLANETARY_RINGS, SLEEP_POD_COTTON, MICROCHIP_CIRCLE,
+  MICROCHIP_OVAL, TRANSLATOR_GRAPHITE_MIST, ROBOT_IRONING, UV_VISOR_AMBER, and
+  GALAXY_SOUNDS_BLACK_HOLES.
+- Add only the positive standalone snack micro names:
+  SNACKPACK_PISTACHIO, SNACKPACK_STRAWBERRY, SNACKPACK_VANILLA.
+- Exclude SNACKPACK_RASPBERRY and SNACKPACK_CHOCOLATE for now.
+
+r5_v2 conservative replay result:
+- day 4 total PnL: +88,462.00
+- day 4 max drawdown: -14,815.00
+- fills: 1,357
+- all active products were positive in the day-4 replay
+
+Short robustness check, first 1000 ticks per day:
+- day 2: -15,022.50
+- day 3: +7,693.00
+- day 4: +27,695.50
+- day 4 ablation without snack module: +23,540.00
+- day 4 snack-only module: +930.50
+- day 4 perturbation range tested: +25,918.50 to +29,003.50
+
+Updated next steps:
+- Treat r5_v2 as the current candidate, not r5_v1.
+- Do not reintroduce broad EMA micro gating until fill markouts show it helps
+  product by product.
+- Full day 2 and day 3 replays were run after the smoke test:
+  - day 2: +33,055.00, max drawdown -32,591.50
+  - day 3: +66,643.00, max drawdown -30,052.00
+  - day 4: +88,462.00, max drawdown -14,815.00
+- Day 2 was weak in the first 1000 ticks but recovered on the full replay, so
+  the early-window loss is more likely a timing/regime issue than a full-day
+  failure.
+- Next alpha extension should be family-relative mean reversion, tested as a
+  separate module before blending with EMA targets.
+
+8. Revision after submitted r5_v2 log
+
+The new submitted/logged strategy was exactly r5_v2. Its official/log result:
+- total PnL: +28,086.98
+- max drawdown: about -7,589.68
+
+This is slightly worse than the old baseline's official/log result:
+- old baseline total PnL: +28,452.03
+- old baseline max drawdown: about -8,145.37
+
+Interpretation:
+- r5_v2 followed the code plan, but not the performance goal.
+- The local conservative harness overstated the value of removing
+  OXYGEN_SHAKE_MORNING_BREATH, ROBOT_MOPPING, and PANEL_1X4.
+- In the submitted/logged run those three removed products were positive in the
+  old baseline, and their removal mostly offset the added SNACKPACK gains.
+- The snack module did help in the submitted/logged run:
+  - SNACKPACK_STRAWBERRY: +1,729.26
+  - SNACKPACK_VANILLA: +1,547.60
+  - SNACKPACK_PISTACHIO: +998.33
+
+r5_v3 implementation:
+- Restore the original baseline EMA roster.
+- Keep the original PEBBLES_XL constraint arb.
+- Keep no broad microstructure gating on EMA products.
+- Keep only the three positive snack names:
+  SNACKPACK_PISTACHIO, SNACKPACK_STRAWBERRY, SNACKPACK_VANILLA.
+
+r5_v3 local full-day replay:
+- day 2: +51,307.00, max drawdown -40,218.00
+- day 3: +120,682.00, max drawdown -24,473.50
+- day 4: +69,302.50, max drawdown -22,055.00
+
+r5_v3 short robustness, first 1000 ticks per day:
+- day 2: -13,921.50
+- day 3: +15,951.00
+- day 4: +32,330.50
+- day 4 without snack module: +28,175.00
+- snack-only day 4: +930.50
+- perturbation range tested: +30,658.50 to +34,591.50
+
+Updated conclusion:
+- r5_v3 is the current best candidate for the local "robust around 50k" target,
+  because all full-day local replays are above 50k.
+- r5_v3 is not proven to reach 50k in the submitted/official environment. Based
+  on the latest submitted log, snack alpha adds roughly 4.3k, not 20k+.
+- To get official/log PnL closer to 50k, we probably need another independent
+  alpha source rather than more roster pruning.
+- The next module should be family-relative mean reversion or pair trading, but
+  it must be tested as a standalone official-style contribution before blending
+  into the EMA book.
+
+9. Revision after submitted r5_v3 log
+
+The submitted/logged r5_v3 result:
+- total PnL: +32,727.22
+- max drawdown: about -7,733.96
+
+This is a clean improvement over both the old baseline and r5_v2:
+- old baseline: +28,452.03
+- r5_v2: +28,086.98
+- r5_v3: +32,727.22
+
+The submitted r5_v3 product PnL confirmed the plan:
+- all three snack names were positive again:
+  - SNACKPACK_STRAWBERRY: +1,729.26
+  - SNACKPACK_VANILLA: +1,547.60
+  - SNACKPACK_PISTACHIO: +998.33
+- restored baseline products also contributed:
+  - ROBOT_MOPPING: +2,011.95
+  - PANEL_1X4: +1,829.47
+  - OXYGEN_SHAKE_MORNING_BREATH: +798.83
+
+r5_v4 implementation:
+- Keep the r5_v3 roster and execution logic.
+- Increase SNACK_LIMIT from 4 to 8.
+- Do not change EMA products or add broad microstructure gating.
+
+Reason:
+- The submitted logs repeatedly show snack alpha is real and additive.
+- Local full-day sweeps showed that increasing the snack limit to 8 improved
+  the day-2 floor and worst drawdown versus r5_v3.
+
+r5_v4 local full-day replay:
+- day 2: +60,324.00, max drawdown -37,142.00
+- day 3: +120,995.00, max drawdown -22,996.50
+- day 4: +67,709.50, max drawdown -22,569.50
+
+Comparison to r5_v3 local full-day replay:
+- r5_v3 day 2: +51,307.00, max drawdown -40,218.00
+- r5_v3 day 3: +120,682.00, max drawdown -24,473.50
+- r5_v3 day 4: +69,302.50, max drawdown -22,055.00
+
+Interpretation:
+- v4 trades a little day-4 local PnL for better day-2 robustness and better
+  drawdown on days 2 and 3.
+- This matches the current preference: very robust while targeting at least
+  around 50k locally.
+- Official/log upside is not guaranteed to scale linearly with snack size, but
+  this is the most defensible next change because it scales the only new module
+  that has been positive in submitted logs.
+
+r5_v4 short robustness, first 1000 ticks per day:
+- day 2: -12,249.50
+- day 3: +19,049.00
+- day 4: +33,525.50
+- train days 2-3: +6,784.00
+- validation day 4: +33,525.50
+- perturbation range tested: +30,753.00 to +35,786.50
+
+Next after v4:
+- Submit/read log before adding another module.
+- If v4 improves submitted PnL, keep snack size 8 and move to a separate
+  family-relative mean-reversion module.
+- If v4 worsens submitted PnL, revert snack size to 4 and focus on a new alpha
+  source instead of scaling snack.
+
+10. Revision after submitted r5_v4 log
+
+The submitted/logged r5_v4 result:
+- total PnL: +34,424.22
+- max drawdown: about -7,658.75
+
+This is another clean improvement:
+- old baseline: +28,452.03
+- r5_v3: +32,727.22
+- r5_v4: +34,424.22
+
+The snack scaling from 4 to 8 worked in the submitted/logged run:
+- SNACKPACK_STRAWBERRY: +2,394.26
+- SNACKPACK_VANILLA: +2,297.60
+- SNACKPACK_PISTACHIO: +1,280.33
+
+Official/log incremental snack improvement from r5_v3 to r5_v4:
+- STAWBERRY: about +665
+- VANILLA: about +750
+- PISTACHIO: about +282
+- total: about +1,697
+
+r5_v5 implementation:
+- Keep the r5_v4 roster and execution logic.
+- Increase SNACK_LIMIT from 8 to 10.
+- Do not remove MICROCHIP_CIRCLE or MICROCHIP_OVAL yet, even though they are
+  repeated official/log losers, because local full-day tests show removing them
+  damages the local day-4 floor too much.
+
+r5_v5 local full-day replay:
+- day 2: +63,027.00, max drawdown -35,984.00
+- day 3: +123,649.00, max drawdown -22,547.00
+- day 4: +66,084.50, max drawdown -22,406.00
+
+Comparison to r5_v4 local full-day replay:
+- r5_v4 day 2: +60,324.00, max drawdown -37,142.00
+- r5_v4 day 3: +120,995.00, max drawdown -22,996.50
+- r5_v4 day 4: +67,709.50, max drawdown -22,569.50
+
+Interpretation:
+- v5 improves the day-2 floor, day-3 PnL, three-day sum, and worst drawdown.
+- v5 gives up about 1.6k local day-4 PnL versus v4, mostly because snack size
+  10 is slightly too large for day-4 local replay.
+- Since the submitted/logged environment has rewarded snack scaling twice, the
+  small local day-4 tradeoff is acceptable for one more controlled submit.
+
+r5_v5 short robustness, first 1000 ticks per day:
+- day 2: -10,734.50
+- day 3: +20,910.00
+- day 4: +33,443.00
+- train days 2-3: +9,773.00
+- validation day 4: +33,443.00
+- perturbation range tested: +30,753.00 to +35,704.00
+
+Next after v5:
+- If submitted/logged PnL improves again, stop scaling snack. The position limit
+  is reached and further gains need a new alpha source.
+- If submitted/logged PnL worsens, revert snack limit to 8.
+- Next serious alpha candidate remains family-relative mean reversion, not more
+  EMA roster pruning.

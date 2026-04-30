@@ -1,0 +1,16 @@
+case,days,ticks,total_pnl,max_drawdown,fill_count,ending_abs_position
+day_2,2,1000,-13921.5,-16247.0,201,101
+day_3,3,1000,15951.0,-9719.0,157,117
+day_4,4,1000,32330.5,-7899.0,170,114
+train_days_2_3,"2,3",2000,2744.0,-16247.0,373,117
+validation_day_4,4,1000,32330.5,-7899.0,170,114
+ablation_no_snackpack,4,1000,28175.0,-8375.0,98,111
+ablation_snackpack_only,4,1000,930.5,-387.0,120,5
+ablation_no_weak_name_confirm,4,1000,32330.5,-7899.0,170,114
+perturb_looser_micro,4,1000,32330.5,-7899.0,170,114
+perturb_base_micro,4,1000,32330.5,-7899.0,170,114
+perturb_stricter_micro,4,1000,32330.5,-7899.0,170,114
+perturb_snack_limit_2,4,1000,30753.0,-8027.0,161,117
+perturb_snack_limit_6,4,1000,33153.5,-7760.0,176,114
+perturb_ema_fast_slow_down,4,1000,30658.5,-8378.5,165,114
+perturb_ema_fast_speed_up,4,1000,34591.5,-7738.5,189,109

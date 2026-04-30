@@ -1,0 +1,16 @@
+ROUND5 robustness summary
+
+Day positives: 2/3
+Worst single day PnL: -13921.50
+Train days 2-3 PnL: 2744.00
+Validation day 4 PnL: 32330.50
+Base day 4 PnL: 32330.50
+Median perturbation PnL: 32330.50
+Worst perturbation PnL: 30658.50
+
+Verdict: Looks reasonably robust under these checks.
+
+Notes:
+- The backtest is conservative and fills only visible-book crossing orders.
+- Passive quote value is undercounted; use this for relative comparisons, not final PnL claims.
+- A robust strategy should not depend on one day, one module, or one exact threshold set.
