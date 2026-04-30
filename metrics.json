@@ -1,0 +1,23 @@
+{
+  "warning": "DANGEROUS_RESEARCH_ONLY__DO_NOT_ASSUME_OUT_OF_SAMPLE_ALPHA",
+  "rows": 18500,
+  "train_rows": 15095,
+  "valid_rows": 3405,
+  "n_features": 330,
+  "n_products": 50,
+  "target": "return",
+  "horizon": 10,
+  "valid_mse": 0.0010934901656582952,
+  "valid_mae": 0.025357874110341072,
+  "valid_r2": -0.25144755840301514,
+  "valid_ic": 0.0985522765301447,
+  "valid_rank_ic": 0.08522115335503715,
+  "sign_accuracy": 0.5292217327459618,
+  "model_infos": [
+    {
+      "best_epoch": 39,
+      "best_score": 0.09854134756005647,
+      "feature_count": 330
+    }
+  ]
+}
