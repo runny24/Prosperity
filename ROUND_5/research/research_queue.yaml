@@ -1,0 +1,21 @@
+experiments:
+  - id: exp_001
+    priority: 1
+    goal: "exploit group structure correlations"
+    groups: ["GALAXY_SOUNDS", "MICROCHIP"]
+    hypothesis: "pairs are mean reverting with lagged adjustment"
+    status: pending
+
+  - id: exp_002
+    priority: 2
+    goal: "basket spread inefficiency"
+    groups: ["PEBBLES", "SNACKPACK"]
+    hypothesis: "basket price deviates from linear combination"
+    status: pending
+
+  - id: exp_003
+    priority: 3
+    goal: "stale pricing arbitrage"
+    groups: ["TRANSLATOR", "UV_VISOR"]
+    hypothesis: "one product leads others by 1 timestep"
+    status: pending
